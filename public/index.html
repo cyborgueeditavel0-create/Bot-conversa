@@ -79,12 +79,23 @@ body{display:flex;flex-direction:column}
 
 /* ── ENVIAR MENSAGEM ── */
 .send-wrap{flex:1;overflow-y:auto;padding:24px}
-.send-card{background:#131e38;border:1px solid #243660;border-radius:16px;padding:24px;max-width:540px}
+.send-card{background:#131e38;border:1px solid #243660;border-radius:16px;padding:24px;max-width:640px}
 .field{margin-bottom:16px}
 .field label{display:block;font-size:11px;color:#4a6080;margin-bottom:6px;font-weight:600}
 .field input,.field textarea{width:100%;background:rgba(0,0,0,.3);border:1px solid #243660;border-radius:8px;color:#d4e6ff;padding:10px 14px;font-size:13px;outline:none}
 .field input:focus,.field textarea:focus{border-color:#25d366}
 .field textarea{resize:vertical;min-height:80px}
+.file-upload-area{border:2px dashed #243660;border-radius:12px;padding:20px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:16px}
+.file-upload-area:hover{border-color:#25d366;background:rgba(37,211,102,.05)}
+.file-upload-area.drag{border-color:#25d366;background:rgba(37,211,102,.15)}
+.file-preview{display:flex;align-items:center;gap:10px;padding:10px;background:#111d35;border-radius:8px;margin-bottom:10px}
+.file-preview-icon{font-size:24px}
+.file-preview-name{flex:1;font-size:12px}
+.file-preview-size{font-size:10px;color:#4a6080}
+.file-preview-remove{background:rgba(235,87,87,.2);border:none;color:#eb5757;border-radius:6px;padding:4px 10px;cursor:pointer}
+.upload-type-select{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.type-btn{background:#111d35;border:1px solid #243660;border-radius:8px;padding:8px 16px;font-size:12px;cursor:pointer;transition:all .2s}
+.type-btn.active{background:#25d366;color:#000;border-color:#25d366}
 
 /* ── FLUXO ── */
 .flow-wrap{flex:1;overflow-y:auto;padding:24px}
@@ -188,14 +199,33 @@ body{display:flex;flex-direction:column}
   </div>
 </div>
 
-<!-- ENVIAR -->
+<!-- ENVIAR - COM UPLOAD DE ARQUIVOS -->
 <div class="page" id="page-enviar">
   <div class="send-wrap">
     <div class="send-card">
-      <h3 style="margin-bottom:20px">📤 Enviar Mensagem Manual</h3>
+      <h3 style="margin-bottom:20px">📤 Enviar Mensagem com Arquivo</h3>
+      
       <div class="field"><label>Número (com DDI e DDD, só números)</label><input id="sendNum" placeholder="5511999999999" type="tel"></div>
-      <div class="field"><label>Mensagem</label><textarea id="sendMsg" placeholder="Digite a mensagem..."></textarea></div>
-      <button class="btn btn-green" onclick="sendManual()">📤 Enviar</button>
+      
+      <div class="field"><label>Mensagem (opcional - pode enviar só o arquivo)</label><textarea id="sendMsg" placeholder="Digite uma mensagem..."></textarea></div>
+      
+      <div class="upload-type-select">
+        <button class="type-btn active" data-type="image" onclick="setFileType('image',this)">📸 Imagem</button>
+        <button class="type-btn" data-type="video" onclick="setFileType('video',this)">🎥 Vídeo</button>
+        <button class="type-btn" data-type="audio" onclick="setFileType('audio',this)">🎵 Áudio</button>
+        <button class="type-btn" data-type="document" onclick="setFileType('document',this)">📄 Documento</button>
+      </div>
+      
+      <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('fileInput').click()" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropFile(event)">
+        <div style="font-size:32px;">📁</div>
+        <div>Clique ou arraste um arquivo aqui</div>
+        <div style="font-size:11px;color:#4a6080;margin-top:5px">Max 16MB</div>
+        <input type="file" id="fileInput" style="display:none" onchange="handleFile(this.files[0])">
+      </div>
+      
+      <div id="filePreview" style="display:none"></div>
+      
+      <button class="btn btn-green" onclick="sendWithFile()" style="width:100%;margin-top:10px">📤 Enviar</button>
     </div>
   </div>
 </div>
@@ -238,54 +268,136 @@ Digite *3* para Falar com humano</textarea>
 <div class="notif" id="notif"></div>
 
 <script>
-// ── Detecta URL do servidor automaticamente ──────────────
-// Se estiver no Railway, usa a URL do site. Se local, usa localhost:3000
-const SERVER_URL = window.location.origin;
+// ── UPLOAD DE ARQUIVOS ───────────────────────────────────
+let currentFileType = 'image';
+let currentFile = null;
 
+function setFileType(type, btn) {
+  currentFileType = type;
+  document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFile = null;
+  document.getElementById('filePreview').style.display = 'none';
+  document.getElementById('filePreview').innerHTML = '';
+}
+
+function dragOver(e) {
+  e.preventDefault();
+  document.getElementById('fileUploadArea').classList.add('drag');
+}
+
+function dragLeave(e) {
+  e.preventDefault();
+  document.getElementById('fileUploadArea').classList.remove('drag');
+}
+
+function dropFile(e) {
+  e.preventDefault();
+  document.getElementById('fileUploadArea').classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+}
+
+function handleFile(file) {
+  const maxSize = 16 * 1024 * 1024;
+  if (file.size > maxSize) {
+    notify('⚠️ Arquivo muito grande! Máximo 16MB', 'r');
+    return;
+  }
+  
+  currentFile = file;
+  const preview = document.getElementById('filePreview');
+  preview.style.display = 'block';
+  
+  const icon = currentFileType === 'image' ? '📸' : currentFileType === 'video' ? '🎥' : currentFileType === 'audio' ? '🎵' : '📄';
+  const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+  
+  preview.innerHTML = `
+    <div class="file-preview">
+      <div class="file-preview-icon">${icon}</div>
+      <div class="file-preview-name">${file.name}</div>
+      <div class="file-preview-size">${sizeMB} MB</div>
+      <button class="file-preview-remove" onclick="clearFile()">✕</button>
+    </div>
+  `;
+  
+  notify(`✅ Arquivo "${file.name}" selecionado!`, 'g');
+}
+
+function clearFile() {
+  currentFile = null;
+  document.getElementById('filePreview').style.display = 'none';
+  document.getElementById('filePreview').innerHTML = '';
+  document.getElementById('fileInput').value = '';
+}
+
+async function sendWithFile() {
+  const num = document.getElementById('sendNum').value.replace(/\D/g,'');
+  const msg = document.getElementById('sendMsg').value;
+  
+  if (!num) { notify('Preencha o número!', 'r'); return; }
+  if (!currentFile && !msg) { notify('Digite uma mensagem ou selecione um arquivo!', 'r'); return; }
+  
+  try {
+    if (currentFile) {
+      const reader = new FileReader();
+      reader.onload = async function(e) {
+        const base64 = e.target.result.split(',')[1];
+        const r = await fetch('/api/sendFile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            number: num, 
+            message: msg || '',
+            file: base64,
+            fileName: currentFile.name,
+            fileType: currentFileType,
+            mimeType: currentFile.type
+          })
+        });
+        const d = await r.json();
+        if (d.ok) { 
+          notify('✅ Arquivo enviado com sucesso!', 'g'); 
+          document.getElementById('sendMsg').value = '';
+          clearFile();
+        } else notify('❌ Erro: ' + d.error, 'r');
+      };
+      reader.readAsDataURL(currentFile);
+    } else {
+      const r = await fetch('/api/send', { 
+        method:'POST', 
+        headers:{'Content-Type':'application/json'}, 
+        body: JSON.stringify({ number: num, message: msg }) 
+      });
+      const d = await r.json();
+      if (d.ok) { notify('✅ Mensagem enviada!', 'g'); document.getElementById('sendMsg').value = ''; }
+      else notify('❌ Erro: ' + d.error, 'r');
+    }
+  } catch(e) { notify('❌ Servidor offline', 'r'); }
+}
+
+// ── Socket e Conexão ─────────────────────────────────────
+const SERVER_URL = window.location.origin;
 const socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
 
 let qrTimer = null, qrSecs = 60;
 let uptimeTimer = null, uptimeSecs = 0;
-let respostas = { '1': 'Suporte...', '2': 'Vendas...', '3': 'Atendente humano...' };
 
-// ── WebSocket events ─────────────────────────────────────
-socket.on('connect', () => {
-  notify('🔗 Conectado ao servidor!', 'g');
-  fetchStatus();
-});
-
+socket.on('connect', () => { notify('🔗 Conectado ao servidor!', 'g'); fetchStatus(); });
 socket.on('disconnect', () => notify('⚠️ Servidor desconectado', 'r'));
-
-socket.on('qr', ({ qr }) => {
-  showQR(qr);
-  startQrTimer();
-});
-
-socket.on('connected', ({ phone, session }) => {
-  onConnected(phone, session);
-});
-
+socket.on('qr', ({ qr }) => { showQR(qr); startQrTimer(); });
+socket.on('connected', ({ phone, session }) => { onConnected(phone, session); });
 socket.on('disconnected', () => onDisconnected());
-
 socket.on('stats', ({ sent, received }) => {
   document.getElementById('stSent').textContent = sent;
   document.getElementById('stRecv').textContent = received;
 });
+socket.on('newMessage', ({ from, text, time }) => { addLiveMsg(from, text, time); });
+socket.on('status', ({ status }) => { document.getElementById('stStatus').textContent = status; });
 
-socket.on('newMessage', ({ from, text, time }) => {
-  addLiveMsg(from, text, time);
-});
-
-socket.on('status', ({ status }) => {
-  document.getElementById('stStatus').textContent = status;
-});
-
-// ── QR Code ───────────────────────────────────────────────
 function showQR(base64img) {
   const box = document.getElementById('qrBox');
-  // Remove loading, mostra imagem
-  box.innerHTML = `<img src="${base64img}" style="width:176px;height:176px;border-radius:4px;">
-    <div class="qr-overlay" id="qrOverlay"></div>`;
+  box.innerHTML = `<img src="${base64img}" style="width:176px;height:176px;border-radius:4px;"><div class="qr-overlay" id="qrOverlay"></div>`;
   document.getElementById('qrTimer').textContent = 'Escaneie agora!';
   document.getElementById('qrFill').style.background = '#25d366';
 }
@@ -307,33 +419,22 @@ function startQrTimer() {
   }, 1000);
 }
 
-// ── Conectado ─────────────────────────────────────────────
 function onConnected(phone, session) {
   clearInterval(qrTimer);
-
-  // Pill
   const pill = document.getElementById('pill');
   pill.className = 'pill on';
   pill.innerHTML = '<div class="dot"></div><span>Conectado</span>';
-
-  // Overlay QR
   const overlay = document.getElementById('qrOverlay');
   if (overlay) { overlay.innerHTML = '<div style="font-size:40px">✅</div><div style="color:#25d366;font-weight:700;font-size:14px">Conectado!</div>'; overlay.classList.add('show'); }
   document.getElementById('qrTimer').textContent = 'Sessão ativa ✅';
   document.getElementById('qrFill').style.background = '#25d366';
   document.getElementById('qrFill').style.width = '100%';
-
-  // Cards
   document.getElementById('stStatus').textContent = '✅ Conectado';
   document.getElementById('stStatus').className = 'stat-val g';
   document.getElementById('stPhone').textContent = phone || '—';
   document.getElementById('stSess').textContent = session || '—';
-
-  // Barra info
   document.getElementById('infoBar').classList.add('show');
   document.getElementById('btnDisconn').style.display = 'inline-flex';
-
-  // Uptime
   uptimeSecs = 0;
   clearInterval(uptimeTimer);
   uptimeTimer = setInterval(() => {
@@ -341,7 +442,6 @@ function onConnected(phone, session) {
     const h = Math.floor(uptimeSecs / 3600), m = Math.floor((uptimeSecs % 3600) / 60), s = uptimeSecs % 60;
     document.getElementById('stUptime').textContent = `${h > 0 ? h + 'h ' : ''}${m > 0 ? m + 'm ' : ''}${s}s`;
   }, 1000);
-
   notify('✅ WhatsApp conectado! Bot online 🚀', 'g');
 }
 
@@ -363,100 +463,22 @@ function onDisconnected() {
 }
 
 async function fetchStatus() {
-  try {
-    const r = await fetch('/api/status');
-    const d = await r.json();
-    if (d.connected) onConnected(d.phone, null);
-    if (d.qr) showQR(d.qr);
-    if (d.stats) {
-      document.getElementById('stSent').textContent = d.stats.sent;
-      document.getElementById('stRecv').textContent = d.stats.received;
-    }
-  } catch(e) {
-    notify('⚠️ Servidor não encontrado. Siga o guia de instalação.', 'r');
-  }
+  try { const r = await fetch('/api/status'); const d = await r.json(); if (d.connected) onConnected(d.phone, null); if (d.qr) showQR(d.qr); if (d.stats) { document.getElementById('stSent').textContent = d.stats.sent; document.getElementById('stRecv').textContent = d.stats.received; } } catch(e) { notify('⚠️ Servidor não encontrado.', 'r'); }
 }
 
-async function disconnect() {
-  if (!confirm('Desconectar WhatsApp?')) return;
-  await fetch('/api/disconnect', { method: 'POST' });
-  onDisconnected();
-}
+async function disconnect() { if (!confirm('Desconectar WhatsApp?')) return; await fetch('/api/disconnect', { method: 'POST' }); onDisconnected(); }
 
-// ── Msgs ao vivo ──────────────────────────────────────────
-function addLiveMsg(from, text, time) {
-  const el = document.getElementById('liveMsgs');
-  const empty = el.querySelector('.live-empty');
-  if (empty) empty.remove();
-  const d = document.createElement('div');
-  d.className = 'live-msg';
-  d.innerHTML = `<div class="from">📱 ${from.replace('@s.whatsapp.net','')}</div><div class="text">${text}</div><div class="time">${new Date(time).toLocaleString('pt-BR')}</div>`;
-  el.insertBefore(d, el.firstChild);
-}
+function addLiveMsg(from, text, time) { const el = document.getElementById('liveMsgs'); const empty = el.querySelector('.live-empty'); if (empty) empty.remove(); const d = document.createElement('div'); d.className = 'live-msg'; d.innerHTML = `<div class="from">📱 ${from.replace('@s.whatsapp.net','')}</div><div class="text">${text}</div><div class="time">${new Date(time).toLocaleString('pt-BR')}</div>`; el.insertBefore(d, el.firstChild); }
 
-// ── Enviar manual ─────────────────────────────────────────
-async function sendManual() {
-  const num = document.getElementById('sendNum').value.replace(/\D/g,'');
-  const msg = document.getElementById('sendMsg').value;
-  if (!num || !msg) { notify('Preencha número e mensagem!', 'r'); return; }
-  try {
-    const r = await fetch('/api/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ number: num, message: msg }) });
-    const d = await r.json();
-    if (d.ok) { notify('✅ Mensagem enviada!', 'g'); document.getElementById('sendMsg').value = ''; }
-    else notify('❌ Erro: ' + d.error, 'r');
-  } catch(e) { notify('❌ Servidor offline', 'r'); }
-}
-
-// ── Fluxo ─────────────────────────────────────────────────
-let respRows = [
-  { key: '1', val: '🛠 Você escolheu *Suporte*. Me descreva seu problema!' },
-  { key: '2', val: '💰 Você escolheu *Vendas*. Nossos planos a partir de R$49/mês.' },
-  { key: '3', val: '👤 Transferindo para atendente humano... Aguarde!' },
-];
-
-function renderRespostas() {
-  const w = document.getElementById('respostasWrap');
-  w.innerHTML = respRows.map((r, i) => `
-    <div class="resp-row">
-      <input value="${r.key}" placeholder="Chave" onchange="respRows[${i}].key=this.value">
-      <input value="${r.val}" placeholder="Resposta" onchange="respRows[${i}].val=this.value">
-      <button onclick="respRows.splice(${i},1);renderRespostas()">✕</button>
-    </div>
-  `).join('');
-}
-
+// ── Fluxo ──
+let respRows = [{ key: '1', val: '🛠 Você escolheu *Suporte*. Me descreva seu problema!' },{ key: '2', val: '💰 Você escolheu *Vendas*. Nossos planos a partir de R$49/mês.' },{ key: '3', val: '👤 Transferindo para atendente humano... Aguarde!' }];
+function renderRespostas() { const w = document.getElementById('respostasWrap'); w.innerHTML = respRows.map((r, i) => `<div class="resp-row"><input value="${r.key}" placeholder="Chave" onchange="respRows[${i}].key=this.value"><input value="${r.val}" placeholder="Resposta" onchange="respRows[${i}].val=this.value"><button onclick="respRows.splice(${i},1);renderRespostas()">✕</button></div>`).join(''); }
 function addResposta() { respRows.push({ key: '', val: '' }); renderRespostas(); }
+async function saveFlow() { const respostasObj = {}; respRows.forEach(r => { if (r.key) respostasObj[r.key.toLowerCase()] = r.val; }); const flow = { ativo: document.getElementById('togBot').classList.contains('on'), mensagemBoasVindas: document.getElementById('flowWelcome').value, respostas: respostasObj, mensagemPadrao: document.getElementById('flowDefault').value, }; try { socket.emit('updateFlow', flow); notify('✅ Fluxo salvo e aplicado!', 'g'); } catch(e) { notify('❌ Erro ao salvar', 'r'); } }
 
-async function saveFlow() {
-  const respostasObj = {};
-  respRows.forEach(r => { if (r.key) respostasObj[r.key.toLowerCase()] = r.val; });
-  const flow = {
-    ativo: document.getElementById('togBot').classList.contains('on'),
-    mensagemBoasVindas: document.getElementById('flowWelcome').value,
-    respostas: respostasObj,
-    mensagemPadrao: document.getElementById('flowDefault').value,
-  };
-  try {
-    socket.emit('updateFlow', flow);
-    notify('✅ Fluxo salvo e aplicado!', 'g');
-  } catch(e) { notify('❌ Erro ao salvar', 'r'); }
-}
+function go(page, btn) { document.querySelectorAll('.page').forEach(p => p.classList.remove('active')); document.getElementById('page-' + page).classList.add('active'); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); btn.classList.add('active'); }
+function notify(msg, type = 'g') { const el = document.getElementById('notif'); el.textContent = msg; el.className = `notif show ${type}`; setTimeout(() => el.classList.remove('show'), 4000); }
 
-// ── Navegação ─────────────────────────────────────────────
-function go(page, btn) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-}
-
-function notify(msg, type = 'g') {
-  const el = document.getElementById('notif');
-  el.textContent = msg; el.className = `notif show ${type}`;
-  setTimeout(() => el.classList.remove('show'), 4000);
-}
-
-// ── Init ──────────────────────────────────────────────────
 renderRespostas();
 </script>
 </body>
